@@ -135,22 +135,155 @@ async function minifyPublicCSS() {
   await processDirectory(publicCssDir, distCssDir);
 }
 
+// Extract all CSS hrefs from HTML files in public directory
+function extractCSSFromHTML() {
+  const publicDir = 'public';
+  const cssFiles = new Set();
+  const excludedFiles = new Set();
+  
+  // Read all HTML files and extract CSS hrefs
+  const htmlFiles = fs.readdirSync(publicDir)
+    .filter(file => file.endsWith('.html') && fs.statSync(path.join(publicDir, file)).isFile());
+  
+  for (const htmlFile of htmlFiles) {
+    const htmlContent = fs.readFileSync(path.join(publicDir, htmlFile), 'utf8');
+    
+    // Extract all CSS link hrefs
+    const cssMatches = htmlContent.match(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi);
+    if (cssMatches) {
+      cssMatches.forEach(match => {
+        const hrefMatch = match.match(/href=["']([^"']+)["']/);
+        if (hrefMatch) {
+          const href = hrefMatch[1];
+          
+          // Skip links marked for build exclusion
+          if (match.includes('data-build="exclude"')) {
+            excludedFiles.add(href);
+            console.log(`⏭️  Excluded from bundle: ${href}`);
+            return;
+          }
+          
+          cssFiles.add(href);
+        }
+      });
+    }
+  }
+  
+  console.log(`Found ${cssFiles.size} CSS files for bundling:`, Array.from(cssFiles));
+  if (excludedFiles.size > 0) {
+    console.log(`Excluded ${excludedFiles.size} CSS files from bundling:`, Array.from(excludedFiles));
+  }
+  return Array.from(cssFiles);
+}
+
+// Generate content-card specific layout CSS
+async function generateContentCardLayoutCSS() {
+  try {
+    console.log('🎨 Generating content-card layout CSS...');
+    
+    // Import from the layout package (simulated via import map)
+    const { generateLayoutCSS } = await import('@browser.style/layout');
+    
+    const result = await generateLayoutCSS('./config.json', {
+      layoutsPath: '../layout/systems',  // Local path for development
+      outputPath: './temp-layout.css',
+      minify: true
+    });
+    
+    console.log(`✓ Generated layout CSS: ${(result.size / 1024).toFixed(1)}KB, ${result.rules} rules`);
+    return result.outputPath;
+  } catch (error) {
+    console.error('❌ Failed to generate layout CSS:', error.message);
+    // Fallback to copying existing layout CSS
+    const fallbackPath = '../layout/dist/layout.min.css';
+    if (fs.existsSync(fallbackPath)) {
+      console.log('📋 Using fallback layout CSS');
+      return fallbackPath;
+    }
+    throw error;
+  }
+}
+
+// Bundle all CSS files into a single file
+async function bundleCSS(cssFiles) {
+  const bundledCSS = [];
+  
+  // Generate layout CSS first
+  const layoutCssPath = await generateContentCardLayoutCSS();
+  const layoutCSS = fs.readFileSync(layoutCssPath, 'utf8');
+  bundledCSS.push('/* Generated Content-Card Layout CSS */');
+  bundledCSS.push(layoutCSS);
+  
+  for (const cssFile of cssFiles) {
+    let cssPath;
+    
+    // Handle different CSS path patterns
+    if (cssFile.startsWith('../src/css/')) {
+      // Source CSS files
+      cssPath = cssFile.replace('../', '');
+    } else if (cssFile.startsWith('static/css/')) {
+      // Public CSS files
+      cssPath = path.join('public', cssFile);
+    } else {
+      // Fallback
+      cssPath = cssFile;
+    }
+    
+    if (fs.existsSync(cssPath)) {
+      const css = fs.readFileSync(cssPath, 'utf8');
+      
+      // Process with PostCSS
+      const result = await postcss([
+        postcssImport(),
+        cssnano({
+          preset: preset()
+        })
+      ]).process(css, { from: cssPath });
+      
+      bundledCSS.push(`/* ${cssFile} */`);
+      bundledCSS.push(result.css);
+      console.log(`✓ Bundled: ${cssFile}`);
+    } else {
+      console.warn(`⚠ CSS file not found: ${cssPath}`);
+    }
+  }
+  
+  // Ensure assets/css directory exists
+  const assetsDir = '../../assets/css';
+  fs.mkdirSync(assetsDir, { recursive: true });
+  
+  // Write bundled CSS
+  const bundlePath = path.join(assetsDir, 'content-card-bundle.css');
+  fs.writeFileSync(bundlePath, bundledCSS.join('\n\n'));
+  console.log(`✓ CSS bundle created: ${bundlePath}`);
+  
+  // Clean up temporary layout CSS file
+  try {
+    if (layoutCssPath.includes('temp-layout.css')) {
+      fs.unlinkSync(layoutCssPath);
+    }
+  } catch (error) {
+    // Ignore cleanup errors
+  }
+  
+  return bundlePath;
+}
+
 // Clean and minify HTML for production
 async function cleanHTML(html) {
-  // First, clean up development-specific content
+  // First, clean up development-specific content and replace all CSS with bundle
   let cleanedHtml = html
     // Remove runtime script tag
     .replace(/<script type="module">\s*import { initContentCards }[^<]*<\/script>/gs, '')
     // Remove importmap script
     .replace(/<script type="importmap">\s*\{[\s\S]*?"@browser\.style\/layout"[\s\S]*?\}\s*<\/script>/gs, '')
-    // Update CSS paths to minified versions
-    .replace(/href="\.\.\/src\/css\/index\.css"/g, 'href="static/css/index.min.css"')
-    // Update layout CSS path to local version
-    .replace(/href="\/ui\/layout\/dist\/layout\.min\.css"/g, 'href="static/css/layout.min.css"')
-    // Update CSS files to minified versions (but avoid double minification)
-    .replace(/href="static\/css\/([^"]+?)(?<!\.min)\.css"/g, 'href="static/css/$1.min.css"')
+    // Remove all existing CSS links
+    .replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '')
+    // Add CSS preload hint early in head (for parallel downloading)
+    .replace('<meta name="view-transition"', '<link rel="preload" href="/assets/css/content-card-bundle.css" as="style">\n\t<meta name="view-transition"')
+    // Add single CSS bundle link in head
+    .replace('</head>', '\t<link rel="stylesheet" href="/assets/css/content-card-bundle.css">\n</head>')
     // Update static asset paths to be relative
-    .replace(/href="static\//g, 'href="static/')
     .replace(/src="static\//g, 'src="static/');
 
   // Then minify the HTML
@@ -247,6 +380,10 @@ function copyAssets() {
 }
 
 async function build() {
+  // Extract and bundle CSS first
+  const cssFiles = extractCSSFromHTML();
+  await bundleCSS(cssFiles);
+  
   await buildCSS();
   await minifyPublicCSS();
   copyAssets();
@@ -258,9 +395,18 @@ async function build() {
     // Ensure dist directory exists
     fs.mkdirSync('dist', { recursive: true });
     
-    // Render pages
-    await renderPage('http://localhost:3000/public/index.html', 'dist/index.html');
-    await renderPage('http://localhost:3000/public/cards.html', 'dist/cards.html');
+    // Discover and render all HTML files in public directory
+    const publicDir = 'public';
+    const htmlFiles = fs.readdirSync(publicDir)
+      .filter(file => file.endsWith('.html') && fs.statSync(path.join(publicDir, file)).isFile());
+    
+    console.log(`Found ${htmlFiles.length} HTML files to build:`, htmlFiles);
+    
+    for (const htmlFile of htmlFiles) {
+      const sourceUrl = `http://localhost:3000/public/${htmlFile}`;
+      const outputPath = `dist/${htmlFile}`;
+      await renderPage(sourceUrl, outputPath);
+    }
     
     console.log('✓ Build complete');
   } finally {

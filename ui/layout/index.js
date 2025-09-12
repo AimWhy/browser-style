@@ -1,39 +1,4 @@
-/**
- * Layout Srcsets Generator
- * 
- * This module provides utilities for generating responsive srcsets attributes
- * for lay-out web components based on layout configurations.
- * 
- * @example
- * import { generateLayoutSrcsets, getSrcset, createLayoutsDataMap } from './layout/index.js';
- * 
- * // Load configuration and layout data
- * const config = await fetch('config.json').then(r => r.json());
- * const gridData = await fetch('systems/layouts/grid.json').then(r => r.json());
- * const columnsData = await fetch('systems/layouts/columns.json').then(r => r.json());
- * 
- * const layoutsData = createLayoutsDataMap({
- *   'grid.json': gridData,
- *   'columns.json': columnsData
- * });
- * 
- * // Generate srcsets for a layout element
- * const layoutElement = document.querySelector('lay-out');
- * const srcsets = generateLayoutSrcsets(layoutElement, config, layoutsData);
- * // Returns: "default:100vw;540:50vw,50vw,100vw;720:33.33vw"
- * 
- * // Get srcset for a specific child element
- * const childSrcset = getSrcset(layoutElement, 0); // First child
- * // Returns: "(min-width: 720px) 33.33vw, (min-width: 540px) 50vw, 100vw"
- */
-
-/**
- * Generates srcsets attribute for lay-out elements
- * @param {Element|string} element - DOM element or lay-out element string
- * @param {Object} config - Loaded config.json object
- * @param {Map} layoutsData - Map of layout type -> layout objects array
- * @returns {string} Formatted srcsets string (e.g., "default:100vw;540:50vw;720:33.33vw")
- */
+// Generate srcset strings from layout element attributes and layout data
 export function generateLayoutSrcsets(element, config, layoutsData) {
   const breakpoints = parseBreakpointsFromElement(element);
   
@@ -41,7 +6,7 @@ export function generateLayoutSrcsets(element, config, layoutsData) {
     return 'default:100vw';
   }
   
-  const srcsetParts = ['default:100vw']; // Mobile-first fallback
+  const srcsetParts = ['default:100vw'];
   
   for (const [breakpointName, layoutPattern] of Object.entries(breakpoints)) {
     const srcset = getSrcsetForPattern(layoutPattern, layoutsData);
@@ -56,80 +21,71 @@ export function generateLayoutSrcsets(element, config, layoutsData) {
   return srcsetParts.join(';');
 }
 
-/**
- * Generates CSS srcset string for a specific child element within a lay-out
- * @param {Element|string} layoutElementOrSrcsets - Layout DOM element, element string, or srcsets string directly
- * @param {number} childIndex - Zero-based index of the child element
- * @returns {string} CSS srcset string (e.g., "(min-width: 720px) 33.33vw, (min-width: 540px) 50vw, 100vw")
- */
-export function getSrcset(layoutElementOrSrcsets, childIndex) {
-  // Get the srcsets string from various input types
+// Generate constraint-aware sizes attribute for responsive images
+export function getSrcset(layoutElementOrSrcsets, childIndex, config = null, constraints = null) {
   let srcsets;
+  let layoutElement = null;
   
   if (typeof layoutElementOrSrcsets === 'string') {
-    // Check if it's an element string with srcsets attribute
     const match = layoutElementOrSrcsets.match(/srcsets="([^"]+)"/);
     if (match) {
       srcsets = match[1];
     } else {
-      // Assume it's the srcsets string directly
       srcsets = layoutElementOrSrcsets;
     }
-  } else if (layoutElementOrSrcsets && layoutElementOrSrcsets.getAttribute) {
-    // It's a DOM element
+  } else if (layoutElementOrSrcsets?.getAttribute) {
+    layoutElement = layoutElementOrSrcsets;
     srcsets = layoutElementOrSrcsets.getAttribute('srcsets');
   }
   
-  if (!srcsets) {
-    return '100vw'; // Fallback if no srcsets found
-  }
+  if (!srcsets) return '100vw';
   
-  // Parse srcsets into breakpoint rules
   const rules = parseSrcsetRules(srcsets);
-  
-  // Extract width for this child index from each rule
   const cssRules = [];
   
-  // Sort rules by pixel value (largest first) for proper CSS srcset order
   const sortedRules = rules
     .filter(rule => rule.pixelKey !== 'default')
     .sort((a, b) => {
       const aMin = parseInt(a.pixelKey.split('-')[0]);
       const bMin = parseInt(b.pixelKey.split('-')[0]);
-      return bMin - aMin; // Descending order
+      return bMin - aMin;
     });
   
-  // Add breakpoint rules (largest first)
   for (const rule of sortedRules) {
     const width = getWidthForChild(rule.widths, childIndex);
     if (width) {
-      cssRules.push(`${rule.mediaQuery} ${width}`);
+      let processedWidth = width;
+      if (config && width.includes('%')) {
+        const elementOrConstraints = constraints || layoutElement || layoutElementOrSrcsets;
+        processedWidth = generateConstrainedSizes([width], elementOrConstraints, config)[0];
+      }
+      cssRules.push(`${rule.mediaQuery} ${processedWidth}`);
     }
   }
   
-  // Add default rule (no media query, comes last)
   const defaultRule = rules.find(rule => rule.pixelKey === 'default');
   if (defaultRule) {
     const defaultWidth = getWidthForChild(defaultRule.widths, childIndex);
     if (defaultWidth) {
-      cssRules.push(defaultWidth);
+      let processedWidth = defaultWidth;
+      if (config && defaultWidth.includes('%')) {
+        const elementOrConstraints = constraints || layoutElement || layoutElementOrSrcsets;
+        processedWidth = generateConstrainedSizes([defaultWidth], elementOrConstraints, config)[0];
+      }
+      cssRules.push(processedWidth);
     }
   }
   
   return cssRules.join(', ') || '100vw';
 }
 
-/**
- * Parses breakpoint attributes from lay-out element
- * @param {Element|string} element - DOM element or element string
- * @returns {Object} Object with breakpoint -> layout pattern mappings
- */
+// Extract breakpoint attributes from layout element
 function parseBreakpointsFromElement(element) {
   let elementString;
   
   if (typeof element === 'string') {
     elementString = element;
-  } else if (element && element.outerHTML) {
+  } else if (element?.outerHTML) {
     elementString = element.outerHTML;
   } else {
     return {};
@@ -149,28 +105,18 @@ function parseBreakpointsFromElement(element) {
   return breakpoints;
 }
 
-/**
- * Gets srcset string for a specific layout pattern
- * @param {string} pattern - Layout pattern like "grid(3a)" or "columns(3)"
- * @param {Map} layoutsData - Map of layout data
- * @returns {string|null} Srcset string or null if not found
- */
+// Look up srcset data for a specific layout pattern
 function getSrcsetForPattern(pattern, layoutsData) {
-  // Parse pattern like "grid(3a)" or "columns(3)"
   const match = pattern.match(/(\w+)\(([^)]+)\)/);
   if (!match) return null;
   
   const [, layoutType, layoutId] = match;
   
-  // Look up the layout in our layouts data
-  let layouts = layoutsData.get(layoutType);
+  let layouts = layoutsData.get(layoutType) || 
+    layoutsData.get(layoutType + 's');
+  
   if (!layouts) {
-    // Try with 's' suffix (e.g., "columns" for "column")
-    layouts = layoutsData.get(layoutType + 's');
-  }
-  if (!layouts) {
-    // Try finding by prefix
-    for (const [key, value] of layoutsData.entries()) {
+    for (const [, value] of layoutsData.entries()) {
       if (Array.isArray(value) && value.length > 0 && value[0].id?.startsWith(layoutType + '(')) {
         layouts = value;
         break;
@@ -178,28 +124,16 @@ function getSrcsetForPattern(pattern, layoutsData) {
     }
   }
   
-  if (!layouts) {
-    return null;
-  }
+  if (!layouts) return null;
   
   const layout = layouts.find(l => l.originalId === layoutId || l.id === `${layoutType}(${layoutId})`);
-  if (!layout) {
-    return null;
-  }
-  
-  return layout.srcset || null;
+  return layout?.srcset || null;
 }
 
-/**
- * Converts breakpoint name to pixel-based key
- * @param {string} breakpointName - Breakpoint name like "md", "lg"
- * @param {Object} config - Config object with systems containing breakpoints
- * @returns {string|null} Pixel key like "540" or "540-920"
- */
+// Convert breakpoint name to pixel range key (e.g., "lg" → "720")
 function getPixelKeyForBreakpoint(breakpointName, config) {
   let breakpointConfig = null;
   
-  // Search through all systems for the breakpoint
   if (config?.systems) {
     for (const system of config.systems) {
       if (system.breakpoints?.[breakpointName]) {
@@ -214,30 +148,14 @@ function getPixelKeyForBreakpoint(breakpointName, config) {
   const min = breakpointConfig.min ? parseInt(breakpointConfig.min.replace('px', '')) : null;
   const max = breakpointConfig.max ? parseInt(breakpointConfig.max.replace('px', '')) : null;
   
-  // Convert to pixel-based key format
-  if (min && max) {
-    return `${min}-${max}`; // Range: "540-920"
-  } else if (min) {
-    return `${min}`; // Min-width only: "540"
-  } else if (max) {
-    return `0-${max}`; // Max-width only: "0-720" (rare case)
-  }
+  if (min && max) return `${min}-${max}`;
+  if (min) return `${min}`;
+  if (max) return `0-${max}`;
   
   return null;
 }
 
-/**
- * Helper function to create layoutsData Map from JSON files
- * @param {Object} layoutFiles - Object where keys are filenames and values are loaded JSON data
- * @returns {Map} Map suitable for use with generateLayoutSrcsets
- * 
- * @example
- * const layoutFiles = {
- *   'grid.json': await loadJSON('grid.json'),
- *   'columns.json': await loadJSON('columns.json')
- * };
- * const layoutsData = createLayoutsDataMap(layoutFiles);
- */
+// Transform layout files into a searchable Map structure
 export function createLayoutsDataMap(layoutFiles) {
   const layoutsData = new Map();
   
@@ -260,52 +178,162 @@ export function createLayoutsDataMap(layoutFiles) {
   return layoutsData;
 }
 
-/**
- * Parses srcsets string into structured rules
- * @param {string} srcsets - Srcsets string like "default:100vw;540:50vw,50vw,100vw;720:33.33vw"
- * @returns {Array} Array of rule objects with pixelKey, mediaQuery, and widths
- */
+// Parse srcset string into structured rules with media queries
 function parseSrcsetRules(srcsets) {
-  const rules = srcsets.split(';');
-  return rules.map(rule => {
+  return srcsets.split(';').map(rule => {
     const [pixelKey, widthsString] = rule.split(':');
-    const widths = widthsString.split(',');
+    const widths = widthsString.split(',').map(w => w.trim());
     
     let mediaQuery = null;
     if (pixelKey !== 'default') {
       if (pixelKey.includes('-')) {
-        // Range: "540-920" -> "(min-width: 540px) and (max-width: 920px)"
         const [min, max] = pixelKey.split('-');
         mediaQuery = `(min-width: ${min}px) and (max-width: ${max}px)`;
       } else {
-        // Min-width only: "540" -> "(min-width: 540px)"
         mediaQuery = `(min-width: ${pixelKey}px)`;
       }
     }
     
-    return {
-      pixelKey,
-      mediaQuery,
-      widths: widths.map(w => w.trim())
-    };
+    return { pixelKey, mediaQuery, widths };
   });
 }
 
-/**
- * Gets the appropriate width value for a specific child index
- * @param {Array} widths - Array of width values for different children
- * @param {number} childIndex - Zero-based child index
- * @returns {string} Width value for this child
- */
+// Get width value for specific child position in layout
 function getWidthForChild(widths, childIndex) {
-  if (widths.length === 1) {
-    // Single width applies to all children
-    return widths[0];
-  } else if (childIndex < widths.length) {
-    // Specific width for this child index
-    return widths[childIndex];
-  } else {
-    // Fallback to last width if index exceeds available widths
-    return widths[widths.length - 1];
+  if (widths.length === 1) return widths[0];
+  if (childIndex < widths.length) return widths[childIndex];
+  return widths[widths.length - 1];
+}
+
+// Convert percentage widths to constrained sizes with min() functions
+function generateConstrainedSizes(percentages, elementOrConstraints, config) {
+  const constraints = elementOrConstraints.hasMaxWidth !== undefined 
+    ? elementOrConstraints 
+    : getLayoutConstraints(elementOrConstraints, config);
+  
+  return percentages.map(percentage => {
+    const percent = parseFloat(percentage);
+    
+    if (!constraints.hasMaxWidth) {
+      return `${percent}vw`;
+    }
+
+    return generateComplexSizes(percent, constraints, config);
+  });
+}
+
+// Extract layout constraints from element and config
+export function getLayoutConstraints(element, config) {
+  const layoutConfig = config.systems?.[0]?.layoutContainer;
+  if (!layoutConfig) return { hasMaxWidth: false };
+
+  const constraints = {
+    hasMaxWidth: false,
+    maxWidth: null,
+    widthToken: null,
+    globalMaxWidth: layoutConfig.maxLayoutWidth?.value,
+    layoutMargin: layoutConfig.layoutMargin?.value,
+    hasBleed: false
+  };
+
+  let bleedValue = null;
+  let widthAttribute = null;
+
+  if (typeof element === 'string') {
+    const bleedMatch = element.match(/bleed="([^"]*)"/);
+    bleedValue = bleedMatch ? bleedMatch[1] : null;
+    const widthMatch = element.match(/width="([^"]+)"/);
+    widthAttribute = widthMatch ? widthMatch[1] : null;
+  } else if (element?.hasAttribute) {
+    bleedValue = element.hasAttribute('bleed') ? element.getAttribute('bleed') : null;
+    widthAttribute = element.getAttribute('width');
   }
+
+  if (bleedValue === '0') {
+    return { hasMaxWidth: false, hasBleed: true, isFullWidth: true };
+  } else if (bleedValue !== null) {
+    constraints.hasBleed = true;
+  }
+
+  if (widthAttribute) {
+    constraints.hasMaxWidth = true;
+    constraints.widthToken = widthAttribute;
+    constraints.maxWidth = layoutConfig.widthTokens?.[constraints.widthToken]?.value;
+  } else if (constraints.globalMaxWidth) {
+    constraints.hasMaxWidth = true;
+    constraints.maxWidth = constraints.globalMaxWidth;
+  }
+  
+  return constraints;
+}
+
+// Generate min() CSS function for constrained layouts
+function generateComplexSizes(percentage, constraints, config) {
+  const breakpoints = config.systems?.[0]?.breakpoints;
+  if (!breakpoints) return `${percentage}vw`;
+
+  if (constraints.maxWidth && constraints.maxWidth.includes('vw')) {
+    return `${percentage}vw`;
+  }
+
+  const maxWidthValue = constraints.maxWidth.includes('rem') 
+    ? parseFloat(constraints.maxWidth) * 16
+    : parseFloat(constraints.maxWidth);
+
+  const constrainedWidth = Math.round(maxWidthValue * (percentage / 100));
+  return `min(${percentage}vw, ${constrainedWidth}px)`;
+}
+
+// Apply layout CSS custom properties to the root element
+export function applyCSSDefaults(config, doc = document) {
+  const layoutConfig = config.systems?.[0]?.layoutContainer;
+  if (!layoutConfig?.layoutRootElement) return false;
+
+  const rootElement = doc.querySelector(layoutConfig.layoutRootElement);
+  if (!rootElement) {
+    console.warn(`Layout root element "${layoutConfig.layoutRootElement}" not found`);
+    return false;
+  }
+
+  if (layoutConfig.maxLayoutWidth) {
+    rootElement.style.setProperty(
+      layoutConfig.maxLayoutWidth.cssProperty,
+      layoutConfig.maxLayoutWidth.value
+    );
+  }
+  
+  if (layoutConfig.layoutMargin) {
+    rootElement.style.setProperty(
+      layoutConfig.layoutMargin.cssProperty, 
+      layoutConfig.layoutMargin.value
+    );
+  }
+  
+  if (layoutConfig.widthTokens) {
+    Object.entries(layoutConfig.widthTokens).forEach(([, tokenConfig]) => {
+      rootElement.style.setProperty(tokenConfig.cssProperty, tokenConfig.value);
+    });
+  }
+
+  return true;
+}
+
+// Generate CSS from config without overwriting layout system files
+export async function generateLayoutCSS(configPath, options = {}) {
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const { default: LayoutBuilder } = await import('./build.js');
+  
+  const defaultLayoutsPath = options.layoutsPath || 
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'systems');
+  
+  const builder = new LayoutBuilder(
+    configPath,
+    defaultLayoutsPath,
+    options.outputPath || './generated-layout.css'
+  );
+  
+  const results = await builder.buildSystems(options.minify !== false);
+  
+  return results[0];
 }

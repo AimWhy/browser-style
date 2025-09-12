@@ -6,37 +6,48 @@
       "path": "layouts",
       "layer": "layout",
       "element": "lay-out",
-      "generateHTML": true,
+      "generateHTML": false,
       "core": ["base"],
-      "common": ["animations"],
+      "common": [],
+      "layoutContainer": {
+        "layoutRootElement": "body",
+        "maxLayoutWidth": {
+          "value": "1024px",
+          "cssProperty": "--layout-bleed-mw"
+        },
+        "layoutMargin": {
+          "value": "1rem", 
+          "cssProperty": "--layout-mi"
+        },
+        "widthTokens": {
+          "xs": { "value": "20rem", "cssProperty": "--layout-width-xs" },
+          "sm": { "value": "30rem", "cssProperty": "--layout-width-sm" },
+          "md": { "value": "48rem", "cssProperty": "--layout-width-md" },
+          "lg": { "value": "64rem", "cssProperty": "--layout-width-lg" },
+          "xl": { "value": "80rem", "cssProperty": "--layout-width-xl" },
+          "xxl": { "value": "96rem", "cssProperty": "--layout-width-xxl" }
+        }
+      },
       "breakpoints": {
         "xs": {
           "type": "@media",
           "min": "240px",
           "max": null,
-          "layouts": ["autofit"]
+          "layouts": []
         },
         "sm": {
           "type": "@media",
           "min": "380px",
           "max": null,
-          "layouts": [
-            "autofit", 
-            {
-              "columns": ["columns(2)"],
-              "grid": ["grid(3a)"],
-              "mosaic": ["mosaic(photo)"]
-            }
-          ]
+          "layouts": []
         },
         "md": {
           "type": "@media",
           "min": "540px",
           "max": null,
-          "layouts": ["columns", 
-            "grid", 
+          "layouts": [
             {
-              "grid": ["grid(3a)"]
+              "columns": ["columns(2)"]
             }
           ]
         },
@@ -44,32 +55,35 @@
           "type": "@media",
           "min": "720px",
           "max": null,
-          "layouts": ["asymmetrical", "bento", "columns", "grid", "ratios"]
+          "layouts": [
+            {
+              "columns": ["columns(3)", "columns(4)"],
+              "grid": ["grid(3c)", "grid(6a)"],
+              "bento": ["bento(4a)"],
+              "ratios": ["ratio(66:33)"]
+            }
+          ]
         },
         "xl": {
           "type": "@media",
           "min": "920px",
           "max": null,
-          "layouts": [
-            {
-              "bento": ["bento(6a)"],
-              "mosaic": ["mosaic(scatter)", "mosaic(hex)", "mosaic(pinwheel)", "mosaic(cornerstone)"]
-            }
-          ]
+          "layouts": []
         },
         "xxl": {
           "type": "@media",
           "min": "1140px",
           "max": null,
-          "layouts": [{ "bento": ["bento(6a)"] }]
+          "layouts": []
         }
       }
     }
   ],
   "settings": {
-    "defaultSrcsetBreakpoints": [180, 280, 320, 380, 480, 640, 720],
+    "defaultSrcsetBreakpoints": [240, 320, 480, 720, 1200],
     "fallbackSrcset": "default:100vw",
-    "layoutDataPath": "/ui/layout/systems/layouts/"
+    "layoutDataPath": "/ui/layout/systems/layouts/",
+    "highPriority": [0, 1]
   },
   "imageTransforms": {
     "defaultProvider": "cloudflare",
@@ -100,7 +114,9 @@
       "enabled": true,
       "source": "layout-attribute",
       "fallback": "ar16x9",
+      "default": "ar16x9",
       "calculations": {
+        "none": { "calculate": "none" },
         "ar1x1": { "ratio": 1, "calculate": "square" },
         "ar16x9": { "ratio": 1.777777, "calculate": "height-from-width" },
         "ar21x9": { "ratio": 2.333333, "calculate": "height-from-width" },
@@ -117,8 +133,7 @@
     "defaultTransforms": {
       "format": "avif",
       "quality": 80,
-      "fit": "cover",
-      "dpr": 1
+      "fit": "cover"
     },
     "responsive": {
       "xs": { "quality": 65, "format": "webp" },
@@ -127,6 +142,12 @@
       "lg": { "quality": 80 },
       "xl": { "quality": 80 },
       "xxl": { "quality": 85 }
+    },
+    "contextTransforms": {
+      "avatar": {
+        "dpr": 2,
+        "quality": 85
+      }
     }
   }
 }

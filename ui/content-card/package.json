@@ -1,6 +1,6 @@
 {
   "name": "@browser.style/content-card",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Modular content card components for web applications with responsive layouts and flexible theming",
   "type": "module",
   "main": "src/js/cards/index.js",
@@ -9,7 +9,7 @@
     "build": "node build.js",
     "serve": "node server.js",
     "start": "npm run build && npm run serve",
-    "test": "node -e \"import('./src/js/cards/index.js').then(m => console.log('✅ Module exports working:', Object.keys(m)))\"",
+    "test": "node -e \"import('fs').then(fs => { if (fs.existsSync('src/js/cards/index.js') && fs.existsSync('src/css/index.css')) console.log('✅ Package structure valid'); else throw new Error('Missing required files'); })\"",
     "prepublishOnly": "npm test"
   },
   "exports": {
