@@ -30,22 +30,48 @@ export function renderSVG(name) {
 	return `<svg viewBox="0 -960 960 960" width="24" height="24"><path d="${ICONS[name]}"></path></svg>`;
 }
 
-export function renderImage(image, useSchema = false, settings = {}, element = null) {
+export function renderImage(image, useSchema = false, settings = {}, element = null, context = null) {
 	if (!image?.src) return '';
 	const schemaAttr = useSchema ? 'itemprop="image"' : '';
 	
-	// Generate responsive srcset and sizes with aspect ratio calculation
-	const { srcset, sizes } = _generateResponsiveSrcset(image.src, element, settings);
+	let imageSrc = image.src;
+	let srcset = '';
+	let sizes = '';
+	
+	// If image has fixed dimensions, create optimized single image
+	if (image.width && image.height) {
+		const config = settings.imageTransformConfig;
+		if (config?.defaultProvider && config.providers?.[config.defaultProvider]) {
+			let transforms = {
+				...config.defaultTransforms,
+				width: image.width,
+				height: image.height
+			};
+			
+			// Apply context-specific transforms
+			if (context && config.contextTransforms?.[context]) {
+				transforms = { ...transforms, ...config.contextTransforms[context] };
+			}
+			
+			imageSrc = buildTransformUrl(image.src, transforms, config);
+		}
+	} else {
+		// Generate responsive srcset for images without fixed dimensions
+		const responsive = _generateResponsiveSrcset(image.src, element, settings);
+		srcset = responsive.srcset;
+		sizes = responsive.sizes;
+	}
 	
 	return `<img 
 		${getStyle('cc-media-image', settings)} 
-		src="${image.src}" 
+		src="${imageSrc}" 
 		${srcset ? `srcset="${srcset}"` : ''}
 		${sizes ? `sizes="${sizes}"` : ''}
 		alt="${image.alt || ''}" 
 		decoding="${image.decoding || 'async'}"
 		${image.width ? `width="${image.width}"` : ''}
 		${image.height ? `height="${image.height}"` : ''}
+		${image.fetchpriority ? `fetchpriority="${image.fetchpriority}"` : ''}
 		loading="${image.loading ? image.loading : 'lazy'}"
 		${schemaAttr}
 	>`;
@@ -185,7 +211,20 @@ export function renderMedia(element, useSchema = false, settings = {}) {
 	<figure ${getStyle('cc-media', settings)}>
 		${media.sources
 			.map((entry) => {
-				if (entry.type === 'image') return renderImage(entry, useSchema, settings, element)
+				if (entry.type === 'image') {
+					// Get high priority layout positions from config
+					const config = window._layoutSrcsetData?.config;
+					const highPriorityPositions = config?.settings?.highPriority || [0, 1];
+					
+					// Optimize loading for images in high priority layout positions
+					const layoutPosition = parseInt(element.getAttribute?.('data-position') || '-1');
+					const optimizedEntry = highPriorityPositions.includes(layoutPosition) ? {
+						...entry,
+						loading: 'eager',
+						fetchpriority: 'high'
+					} : entry;
+					return renderImage(optimizedEntry, useSchema, settings, element);
+				}
 				if (entry.type === 'video') return renderVideo(entry, useSchema, settings)
 				if (entry.type === 'youtube') return renderYouTube(entry, useSchema, settings)
 			})
@@ -382,14 +421,7 @@ export function renderAuthors(authors, includeSchema = false, settings = {}) {
 		<div ${getStyle('cc-authors', settings)}>
 			${authors.map(author => {
 				const avatar = author.avatar;
-				const avatarImg = avatar ?
-					`<img src="${avatar.src}" 
-						alt="${avatar.alt || author.name}" 
-						${avatar.width !== undefined ? `width="${avatar.width}"` : ''} 
-						${avatar.height !== undefined ? `height="${avatar.height}"` : ''} 
-						${includeSchema ? 'itemprop="image"' : ''}
-						${getStyle('cc-avatar', settings)}>`
-					: '';
+				const avatarImg = avatar ? renderImage(avatar, includeSchema, settings, null, 'avatar').replace('cc-media-image', 'cc-avatar') : '';
 
 				return `<address ${getStyle('cc-author', settings)} ${includeSchema ? 'itemprop="author" itemscope itemtype="https://schema.org/Person"' : ''}>
 					${avatarImg}
@@ -526,6 +558,12 @@ function extractAspectRatio(element, config) {
 		return config.aspectRatio.calculations[arKey] || null;
 	}
 	
+	// Use default aspect ratio if none found in layout attribute
+	const defaultAspectRatio = config.aspectRatio.default;
+	if (defaultAspectRatio && config.aspectRatio.calculations[defaultAspectRatio]) {
+		return config.aspectRatio.calculations[defaultAspectRatio];
+	}
+	
 	return null;
 }
 
@@ -583,18 +621,17 @@ function generateSrcsetString(imageSrc, element, breakpoints, config) {
 			
 			// Calculate height based on aspect ratio
 			if (aspectConfig) {
-				let height;
 				switch (aspectConfig.calculate) {
+					case 'none':
+						// Preserve original dimensions - remove fit parameter and don't set height
+						delete transforms.fit;
+						break;
 					case 'square':
-						height = width;
+						transforms.height = width;
 						break;
 					case 'height-from-width':
-						height = Math.round(width / aspectConfig.ratio);
+						transforms.height = Math.round(width / aspectConfig.ratio);
 						break;
-				}
-				
-				if (height) {
-					transforms.height = height;
 				}
 			}
 			

@@ -1,5 +1,5 @@
 // Reusable build script for content cards
-import { generateLayoutSrcsets, createLayoutsDataMap } from '@browser.style/layout';
+import { generateLayoutSrcsets, createLayoutsDataMap, applyCSSDefaults, getLayoutConstraints, getSrcset } from '@browser.style/layout';
 
 // Determine the base path for content-card folder relative to current location
 function getBasePath() {
@@ -107,6 +107,8 @@ async function initializeLayoutSrcsets() {
 			}
 		});
 		
+		// Apply CSS custom properties if layoutRootElement is specified
+		applyCSSDefaults(config);
 
 		// Store globally for card system to use
 		window._layoutSrcsetData = {
@@ -127,6 +129,9 @@ async function initializeLayoutSrcsets() {
 					element.setAttribute('srcsets', config.settings.fallbackSrcset);
 				}
 				
+				// Get layout constraints for this element
+				const constraints = getLayoutConstraints(element, config);
+				
 				// Set layout data on child elements
 				Array.from(element.children).forEach((child, childIndex) => {
 					child.setAttribute('data-layout-index', childIndex);
@@ -139,6 +144,10 @@ async function initializeLayoutSrcsets() {
 							child._settings.layoutSrcsets = srcsets || window._layoutSrcsetData.config.settings.fallbackSrcset;
 							child._settings.srcsetBreakpoints = window._layoutSrcsetData.config.settings.defaultSrcsetBreakpoints;
 							
+							// Pre-calculate constraint-aware sizes
+							if (constraints) {
+								child._settings.layoutSrcset = getSrcset(child._settings.layoutSrcsets, childIndex, config, constraints);
+							}
 						}
 					} catch (error) {
 						// Silently continue if settings can't be set
@@ -151,6 +160,39 @@ async function initializeLayoutSrcsets() {
 		});
 
 
+	} catch (error) {
+		// Silently fail and continue
+	}
+}
+
+// Create layout position mapping for high priority image loading
+function createLayoutPositionMap() {
+	try {
+		window._layoutPositions = new Map();
+		
+		let layoutPosition = 0;
+		
+		// Get all top-level elements in document order
+		const bodyChildren = Array.from(document.body.children);
+		
+		bodyChildren.forEach((element) => {
+			if (element.tagName.toLowerCase() === 'lay-out') {
+				// Process all cards within this layout
+				Array.from(element.children).forEach((child) => {
+					if (child.hasAttribute('content')) {
+						child.setAttribute('data-position', layoutPosition);
+						window._layoutPositions.set(child, layoutPosition);
+					}
+				});
+				layoutPosition++;
+			} else if (element.hasAttribute('content')) {
+				// Individual card outside layout
+				element.setAttribute('data-position', layoutPosition);
+				window._layoutPositions.set(element, layoutPosition);
+				layoutPosition++;
+			}
+		});
+		
 	} catch (error) {
 		// Silently fail and continue
 	}
@@ -294,8 +336,9 @@ export async function initContentCards(dataSrc = 'data.json') {
 	// Setup global layout updater
 	setupGlobalLayoutUpdater();
 	
-	// Initialize layout srcsets first, then cards
+	// Initialize layout srcsets first, then layout positions, then cards
 	await initializeLayoutSrcsets();
+	createLayoutPositionMap();
 	await initializeCards(dataSrc, allCards);
 	
 }
